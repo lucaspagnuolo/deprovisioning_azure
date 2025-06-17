@@ -4,7 +4,7 @@ import pandas as pd
 # Funzione testuale di deprovisioning
 def genera_deprovisioning(email: str, manager: str, sm_df: pd.DataFrame) -> list:
     email_lower = email.strip().lower()
-    title = f"[Consip – SR] Deprovisioning risorsa Azure - {email_lower}"
+    title = f"[Consip – SR][{ticket}] Deprovisioning - {cognome} {nome} (esterno)"
     lines = ["Ciao,", f"per {email_lower}: "]
 
     step = 1
@@ -51,8 +51,11 @@ def main():
     st.title("Deprovisioning Risorsa Azure")
 
     # Input fields
-    email = st.text_input("Email della risorsa Azure", "").strip()
+    nome = st.text_input("Nome", "").strip()
+    cognome = st.text_input("Cognome", "").strip()
+    email = st.text_input("Email della risorsa Azure", "@consip.it").strip()
     manager = st.text_input("Manager", "").strip()
+    ticket = st.text_input("Numero di riferimento Ticket", "").strip()
     st.markdown("---")
 
     # File uploader for SM
