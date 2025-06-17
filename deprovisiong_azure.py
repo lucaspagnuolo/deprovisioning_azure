@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # Funzione testuale di deprovisioning
-def genera_deprovisioning(email: str, manager: str, sm_df: pd.DataFrame) -> list:
+def genera_deprovisioning(email: str, ticket: str, cognome: str ,nome: str , manager: str, sm_df: pd.DataFrame) -> list:
     email_lower = email.strip().lower()
     title = f"[Consip – SR][{ticket}] Deprovisioning - {cognome} {nome} (esterno)"
     lines = ["Ciao,", f"per {email_lower}: "]
