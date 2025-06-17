@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 
 # Funzione testuale di deprovisioning
-def genera_deprovisioning(email: str, ticket: str, cognome: str ,nome: str , manager: str, sm_df: pd.DataFrame) -> list:
+def genera_deprovisioning(email: str, ticket: str, cognome: str, nome: str, manager: str, sm_df: pd.DataFrame) -> list:
     email_lower = email.strip().lower()
     title = f"[Consip – SR][{ticket}] Deprovisioning - {cognome} {nome} (esterno)"
-    lines = ["Ciao,", f"per {email_lower}: "]
+    lines = ["Ciao,", f"per {email_lower}:"]
 
     step = 1
-    # Fixed steps
+    # Passaggi fissi
     fixed = [
         "Disabilitare l’account di Azure",
         f"Impostazione Manager con: {manager}",
@@ -21,7 +21,7 @@ def genera_deprovisioning(email: str, ticket: str, cognome: str ,nome: str , man
         lines.append(f"{step}. {desc}")
         step += 1
 
-    # Step for SM
+    # Rimozione abilitazioni da SM
     sm_list = []
     if not sm_df.empty and sm_df.shape[1] > 2:
         mask = sm_df.iloc[:, 2].astype(str).str.lower() == email_lower
@@ -32,7 +32,7 @@ def genera_deprovisioning(email: str, ticket: str, cognome: str ,nome: str , man
             lines.append(f"   - {sm}")
         step += 1
 
-    # Remaining fixed
+    # Passaggi finali
     final = [
         "Rimozione licenze",
         "Cancellare la foto da Azure",
@@ -45,36 +45,35 @@ def genera_deprovisioning(email: str, ticket: str, cognome: str ,nome: str , man
     return [title] + lines
 
 # Streamlit UI
-
 def main():
     st.set_page_config(page_title="Deprovisioning Consip", layout="centered")
     st.title("Deprovisioning Risorsa Azure")
 
-    # Input fields
+    # Campi di input
     nome = st.text_input("Nome", "").strip()
     cognome = st.text_input("Cognome", "").strip()
-    email = st.text_input("Email della risorsa Azure", "@consip.it").strip()
+    email = st.text_input("Email della risorsa Azure", "").strip()
     manager = st.text_input("Manager", "").strip()
     ticket = st.text_input("Numero di riferimento Ticket", "").strip()
     st.markdown("---")
 
-    # File uploader for SM
+    # Upload file SM
     sm_file = st.file_uploader("Carica file SM (Excel)", type="xlsx")
 
     if st.button("Genera Template di Deprovisioning"):
-        if not email or not manager:
-            st.error("Inserisci sia l'email della risorsa che il manager")
+        if not all([nome, cognome, email, manager, ticket]):
+            st.error("Inserisci Nome, Cognome, Email, Manager e Numero di Ticket")
             return
 
-        # Read SM dataframe
+        # Lettura SM dataframe
         sm_df = pd.read_excel(sm_file) if sm_file else pd.DataFrame()
 
-        # Generate steps
-        steps = genera_deprovisioning(email, manager, sm_df)
+        # Genera template
+        steps = genera_deprovisioning(email, ticket, cognome, nome, manager, sm_df)
 
-        # Display result
+        # Visualizza risultato
         for line in steps:
-            if line.startswith("[") and line.endswith("]"):
+            if line.startswith("[") and "]" in line:
                 st.subheader(line)
             else:
                 st.text(line)
