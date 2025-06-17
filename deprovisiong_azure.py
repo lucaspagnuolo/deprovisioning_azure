@@ -52,7 +52,7 @@ def main():
     # Campi di input
     nome = st.text_input("Nome", "").strip()
     cognome = st.text_input("Cognome", "").strip()
-    email = st.text_input("Email della risorsa Azure", "").strip()
+    email = st.text_input("Email della risorsa Azure", ".ext@consip.it").strip()
     manager = st.text_input("Manager", "").strip()
     ticket = st.text_input("Numero di riferimento Ticket", "").strip()
     st.markdown("---")
