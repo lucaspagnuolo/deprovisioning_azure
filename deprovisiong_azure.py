@@ -378,4 +378,7 @@ def main():
             for msg in avvisi:
                 st.warning(msg)
 
+
 if __name__ == "__main__":
+    main()
+
