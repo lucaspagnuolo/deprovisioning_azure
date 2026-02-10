@@ -9,14 +9,49 @@ def _normalize_colname(name: str) -> str:
     return str(name).strip().lower()
 
 def _require_columns(df: pd.DataFrame, required: list[str], label: str) -> tuple[bool, list[str]]:
-    norm_cols = { _normalize_colname(c): c for c in df.columns }
+    norm_cols = {_normalize_colname(c): c for c in df.columns}
     missing = [c for c in required if c not in norm_cols]
     return (len(missing) == 0, missing)
 
 def _get(df: pd.DataFrame, colname: str):
     # Prende la colonna originale rispettando il nome reale (case-insensitive)
-    mapping = { _normalize_colname(c): c for c in df.columns }
+    mapping = {_normalize_colname(c): c for c in df.columns}
     return df[mapping[colname]]
+
+# --- NEW: supporto colonne alternative (EN/IT) ---
+def _resolve_any_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """
+    Ritorna il nome colonna reale presente in df tra i candidati (case-insensitive),
+    oppure None se nessuna è trovata.
+    """
+    mapping = {_normalize_colname(c): c for c in df.columns}
+    for cand in candidates:
+        key = _normalize_colname(cand)
+        if key in mapping:
+            return mapping[key]
+    return None
+
+def _get_any(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
+    """
+    Ritorna la Series della prima colonna trovata tra i candidati.
+    Solleva KeyError se nessuna è presente.
+    """
+    col = _resolve_any_column(df, candidates)
+    if col is None:
+        raise KeyError(f"Nessuna delle colonne attese trovata: {', '.join(candidates)}")
+    return df[col]
+
+def _require_any(df: pd.DataFrame, logical_required: dict[str, list[str]], label: str) -> tuple[bool, list[str]]:
+    """
+    logical_required: { 'NomeLogico': ['colA', 'colB', ...], ... }
+    OK se per ogni NomeLogico esiste almeno una colonna tra le alternative.
+    missing contiene i NomiLogici mancanti.
+    """
+    missing = []
+    for logical_name, candidates in logical_required.items():
+        if _resolve_any_column(df, candidates) is None:
+            missing.append(logical_name)
+    return (len(missing) == 0, missing)
 
 def _read_excel(file, label: str) -> pd.DataFrame | None:
     try:
@@ -74,20 +109,25 @@ def estrai_shared_mailboxes(upn: str, df: pd.DataFrame) -> list[str]:
 
 def estrai_group_members(upn: str, df: pd.DataFrame) -> list[str]:
     """
-    Ritorna elenco di GroupName dove MemberUserPrincipalName == UPN.
+    Ritorna elenco di GroupName/NomeGruppo dove:
+    - MemberUserPrincipalName (EN) oppure UserPrincipalNameMembro (IT) == UPN
+    Supporta intestazioni EN/IT.
     """
-    req = ["memberuserprincipalname", "groupname"]
-    ok, missing = _require_columns(df, req, "EntraGroupMembers")
+    required = {
+        "member_upn": ["memberuserprincipalname", "userprincipalnamemembro"],
+        "group_name": ["groupname", "nomegruppo"],
+    }
+    ok, missing = _require_any(df, required, "EntraGroupMembers")
     if not ok:
-        st.error(f"Nel file 'EntraGroupMembers' mancano le colonne: {', '.join(missing)}")
+        st.error(f"Nel file 'EntraGroupMembers' mancano i campi: {', '.join(missing)}")
         return []
 
-    member_col = _get(df, "memberuserprincipalname").astype(str).str.strip().str.lower()
+    member_col = _get_any(df, required["member_upn"]).astype(str).str.strip().str.lower()
     mask = member_col == upn
     if not mask.any():
         return []
 
-    groups = _clean_series_to_list(_get(df.loc[mask], "groupname"))
+    groups = _clean_series_to_list(_get_any(df.loc[mask], required["group_name"]))
     return groups
 
 def estrai_user_mailbox_exists(upn: str, df: pd.DataFrame) -> bool:
@@ -128,42 +168,48 @@ def build_owner_group_warnings(owner_groups: list[str], df_groups: pd.DataFrame 
     Per i gruppi dove l'utente è Owner, genera avvisi:
     - elenco dei gruppi per cui è owner
     - se unico utente registrato
-    - oppure elenco altri utenti registrati (MemberEmail preferito; fallback a MemberUserPrincipalName), escludendo l'UPN
+    - oppure elenco altri utenti registrati (MemberEmail/EmailMembro preferito; fallback UPN membro),
+      escludendo l'UPN
     """
     warnings = []
     if not owner_groups:
         return warnings
 
-    # Avviso generale elenco gruppi owner
     warnings.append(f"Per i seguenti Gruppi {owner_groups} utente indicato è Owner")
 
     if df_groups is None:
         warnings.append("Impossibile verificare il numero di membri: file 'EntraGroupMembers' non caricato.")
         return warnings
 
-    # Prepara colonne disponibili per i membri
-    members_colname = None
-    if _require_columns(df_groups, ["memberemail", "groupname"], "EntraGroupMembers")[0]:
-        members_colname = "memberemail"
-    elif _require_columns(df_groups, ["memberuserprincipalname", "groupname"], "EntraGroupMembers")[0]:
-        members_colname = "memberuserprincipalname"
-    else:
-        warnings.append("Nel file 'EntraGroupMembers' non sono presenti colonne membri attese (MemberEmail o MemberUserPrincipalName).")
-        return warnings
+    # Supporto colonne EN/IT su EntraGroupMembers
+    group_candidates = ["groupname", "nomegruppo"]
+    member_email_candidates = ["memberemail", "emailmembro"]
+    member_upn_candidates = ["memberuserprincipalname", "userprincipalnamemembro"]
 
-    grp_col = _get(df_groups, "groupname")
-    mem_col = _get(df_groups, members_colname).astype(str).str.strip()
+    # Group column obbligatoria
+    grp_col_name = _resolve_any_column(df_groups, group_candidates)
+    if grp_col_name is None:
+        warnings.append("Nel file 'EntraGroupMembers' manca la colonna del nome gruppo (GroupName/NomeGruppo).")
+        return warnings
+    grp_col = df_groups[grp_col_name].astype(str).str.strip()
+
+    # Preferisci email membro se presente, altrimenti UPN membro
+    mem_col_name = _resolve_any_column(df_groups, member_email_candidates) or _resolve_any_column(df_groups, member_upn_candidates)
+    if mem_col_name is None:
+        warnings.append("Nel file 'EntraGroupMembers' non sono presenti colonne membri attese (MemberEmail/EmailMembro o MemberUserPrincipalName/UserPrincipalNameMembro).")
+        return warnings
+    mem_col = df_groups[mem_col_name].astype(str).str.strip()
 
     # Per ogni gruppo owner, valuta quanti membri e chi
     for grp in owner_groups:
-        mask_grp = grp_col.astype(str).str.strip() == grp
+        mask_grp = grp_col == str(grp).strip()
         if not mask_grp.any():
             warnings.append(f"Per il gruppo {grp} non sono presenti membri in 'EntraGroupMembers'.")
             continue
 
         members_all = _clean_series_to_list(mem_col.loc[mask_grp])
-        # Normalizza per confronto con UPN (case-insensitive)
         members_all_lower = [m.lower() for m in members_all]
+
         # Escludi l'UPN dalle liste da mostrare
         others = [m for m in members_all if m.lower() != upn]
 
@@ -172,7 +218,6 @@ def build_owner_group_warnings(owner_groups: list[str], df_groups: pd.DataFrame 
         elif len(others) > 0:
             warnings.append(f"Per il gruppo che è owner {grp} risultano registrati anche gli utenti {others}")
         else:
-            # Caso raro: più membri ma dopo esclusione UPN non resta nessuno (es. duplicati)
             warnings.append(f"Per il gruppo che è owner {grp} non sono emersi altri utenti oltre all'UPN indicato.")
     return warnings
 
@@ -185,9 +230,7 @@ def build_shared_mailbox_last_user_warnings(shared_mailboxes: list[str], df_sm: 
     if not shared_mailboxes or df_sm is None:
         return warnings
 
-    # Richieste colonne
     if not _require_columns(df_sm, ["member", "emailaddress"], "SharedMailboxesDetails")[0]:
-        # Errore già mostrato altrove, esci silenziosamente qui
         return warnings
 
     member_col = _get(df_sm, "member").astype(str).str.strip().str.lower()
@@ -196,7 +239,6 @@ def build_shared_mailbox_last_user_warnings(shared_mailboxes: list[str], df_sm: 
     for sm in shared_mailboxes:
         mask_sm = email_col == sm
         if not mask_sm.any():
-            # Se non troviamo la SM nella tabella completa, non possiamo valutare l'ultimo utente
             continue
         members_for_sm = _clean_series_to_list(member_col.loc[mask_sm])
         if len(members_for_sm) == 1 and members_for_sm[0] == upn:
@@ -231,7 +273,7 @@ def genera_template_deprovisioning(
     step_items.append(f"Impostazione Manager con: {manager_display_name or '—'}")
     step_items.append("Impostare Hide dalla Rubrica")
 
-    # >>> Punto PST da inserire qui se l'utente ha mailbox <<<
+    # Punto PST se l'utente ha mailbox
     if has_user_mailbox:
         step_items.append(
             f"Estrarre il PST (O365 eDiscovery) da archiviare in "
@@ -262,10 +304,8 @@ def genera_template_deprovisioning(
             lines.append(f"   - {g}")
         step += 1
 
-    # Finali
+    # Finali (aggiornati: rimosse foto Azure e Wi-Fi)
     lines.append(f"{step}. Rimozione licenze"); step += 1
-    lines.append(f"{step}. Cancellare la foto da Azure"); step += 1
-    lines.append(f"{step}. Rimozione Wi-Fi")
 
     return [title] + lines
 
@@ -294,7 +334,7 @@ def main():
             st.error("Inserisci un UserPrincipalName valido.")
             return
 
-        # Lettura file (opzionali ma utili a popolare sezioni/avvisi)
+        # Lettura file
         df_utenti = _read_excel(f_utenti, "Utenti_Azure") if f_utenti else None
         df_sm = _read_excel(f_sm, "SharedMailboxesDetails") if f_sm else None
         df_groups = _read_excel(f_groups, "EntraGroupMembers") if f_groups else None
@@ -378,7 +418,5 @@ def main():
             for msg in avvisi:
                 st.warning(msg)
 
-
 if __name__ == "__main__":
     main()
-
