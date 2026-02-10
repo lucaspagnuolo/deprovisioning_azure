@@ -130,18 +130,33 @@ def estrai_group_members(upn: str, df: pd.DataFrame) -> list[str]:
     groups = _clean_series_to_list(_get_any(df.loc[mask], required["group_name"]))
     return groups
 
+
 def estrai_user_mailbox_exists(upn: str, df: pd.DataFrame) -> bool:
     """
-    Verifica se esiste una mailbox associata all'UPN cercando in 'ObjectKey'.
+    Verifica se esiste una mailbox associata all'UPN.
+    Ordine di ricerca:
+    1) PrimarySmtpAddress
+    2) ObjectKey (fallback)
     """
-    req = ["objectkey"]
-    ok, missing = _require_columns(df, req, "UserMailboxes")
-    if not ok:
-        st.error(f"Nel file 'UserMailboxes' mancano le colonne: {', '.join(missing)}")
-        return False
+    # Prova prima con PrimarySmtpAddress
+    col_primary = _resolve_any_column(df, ["primarysmtpaddress"])
+    if col_primary is not None:
+        primary = df[col_primary].astype(str).str.strip().str.lower()
+        if (primary == upn).any():
+            return True
 
-    obj_col = _get(df, "objectkey").astype(str).str.strip().str.lower()
-    return (obj_col == upn).any()
+    # Fallback su ObjectKey
+    col_obj = _resolve_any_column(df, ["objectkey"])
+    if col_obj is not None:
+        obj = df[col_obj].astype(str).str.strip().str.lower()
+        if (obj == upn).any():
+            return True
+
+    # Se non esiste nessuna delle colonne attese, segnala errore
+    if col_primary is None and col_obj is None:
+        st.error("Nel file 'UserMailboxes' mancano le colonne: PrimarySmtpAddress e ObjectKey")
+    return False
+
 
 def estrai_group_owners_for_user(upn: str, df: pd.DataFrame) -> list[str]:
     """
