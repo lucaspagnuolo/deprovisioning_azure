@@ -284,8 +284,8 @@ def genera_template_deprovisioning(
 
     # Costruiamo dinamicamente gli step numerati
     step_items: list[str] = []
+    step_items.append(f"Impostazione Manager con: {manager_display_name or 'NOT FOUND :('}")
     step_items.append("Disabilitare l’account di Azure")
-    step_items.append(f"Impostazione Manager con: {manager_display_name or '—'}")
     step_items.append("Impostare Hide dalla Rubrica")
 
     # Punto PST se l'utente ha mailbox
